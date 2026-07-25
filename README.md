@@ -47,38 +47,29 @@ extension covers what falls through.
 
 ```mermaid
 flowchart TD
-    REQ["Request to Claude"]
     CLS{"Classifier declined?"}
-    DONE["Turn completes normally"]
+    DONE(["Turn completes normally"])
 
-    subgraph BUILTIN["Built into omp - turn these on first"]
-        L1{"serverSideFallback on, and model is Fable 5 / Mythos 5?"}
-        SSF["Anthropic re-runs the request on claude-opus-4-8"]
-        L2{"retry.fallbackChains covers this model?"}
-        CHAIN["omp pins the next model and retries the turn"]
+    subgraph BUILTIN["omp built-ins - turn these on first"]
+        L1{"Layer 1: server-side fallback<br/>to claude-opus-4-8"}
+        L2{"Layer 2: retry.fallbackChains"}
     end
 
-    subgraph GUARD["pi-refusal-guard"]
-        REC["Record model, category, explanation"]
-        PART{"Text or tool call already emitted?"}
-        LEAVE["Leave the turn alone - logged partial"]
-        CAP{"Already rescued since the last real output?"}
-        DEAD["Stop - logged dead"]
-        RESCUE["Continue with a reframing note - logged rescued"]
+    subgraph GUARD["Layer 3: pi-refusal-guard"]
+        PART{"Output already emitted?"}
+        CAP{"Rescued since the<br/>last real output?"}
+        RESCUE["Continue with a<br/>reframing note"]
     end
 
-    REQ --> CLS
+    LEAVE(["Left alone - logged partial"])
+    DEAD(["Dead stop - logged dead"])
+
     CLS -->|no| DONE
     CLS -->|"yes, stop_reason refusal"| L1
-    L1 -->|yes| SSF
-    L1 -->|no| L2
-    SSF -->|answered| DONE
-    SSF -->|"still refused"| L2
-    L2 -->|yes| CHAIN
-    L2 -->|"no, and this is where the turn dies silently"| REC
-    CHAIN -->|answered| DONE
-    CHAIN -->|"still refused"| REC
-    REC --> PART
+    L1 -->|"a fallback answered"| DONE
+    L1 -->|"ineligible, or still refused"| L2
+    L2 -->|"a fallback answered"| DONE
+    L2 -->|"no chain, or still refused"| PART
     PART -->|yes| LEAVE
     PART -->|no| CAP
     CAP -->|yes| DEAD
@@ -86,8 +77,9 @@ flowchart TD
     RESCUE --> DONE
 ```
 
-Without the extension, every path that reaches the bottom of the omp layers ends
-the turn with no output and no explanation.
+Without the extension, everything that falls out of layer 2 ends the turn with
+no output and no explanation. Every refusal is logged either way, so `/refusals`
+shows what tripped even when a layer above recovered it.
 
 ## Install
 
