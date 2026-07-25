@@ -110,17 +110,36 @@ interface Refusal {
 }
 
 /**
- * Pull refusal details off an assistant message. Anthropic reports a classifier
- * decline as stopReason "error" with stopDetails.type "refusal"; some paths
- * surface it as "sensitive" instead.
+ * `Flag.ContentBlocked` from `@oh-my-pi/pi-ai`. omp sets this bit on
+ * `AssistantMessage.errorId` when a provider refused on content grounds —
+ * Google `promptFeedback.blockReason`, an OpenAI Responses
+ * `incomplete: content_filter`, and anything else it classifies the same way.
+ * Mirrored as a literal so the package keeps no dependency on omp.
+ */
+const CONTENT_BLOCKED_FLAG = 32768;
+
+/**
+ * Provider wordings for a content block on paths that report it as plain error
+ * text rather than a flag — notably an OpenAI chat-completions
+ * `finish_reason: content_filter`.
+ */
+const CONTENT_BLOCK_PATTERN = /\bcontent[_ ]?filter\b|\bblocked by google\b/i;
+
+/**
+ * Pull decline details off an assistant message.
+ *
+ * Anthropic is the rich case: a classifier decline arrives as stopReason
+ * "error" with a structured `stopDetails` naming the category (`cyber`, `bio`,
+ * …). Some paths surface it as `sensitive` instead.
+ *
+ * Every other provider reports a content block as an ordinary error, so it is
+ * recognised through omp's `ContentBlocked` error flag or, failing that, the
+ * error text. Those carry no category, so they are filed as `content-blocked`.
  */
 function readRefusal(message: unknown): Refusal | undefined {
   if (!isRecord(message)) return undefined;
   if (message.role !== "assistant") return undefined;
-  const details = message.stopDetails;
-  if (!isRecord(details)) return undefined;
-  const type = details.type;
-  if (type !== "refusal" && type !== "sensitive") return undefined;
+  if (message.stopReason !== "error") return undefined;
 
   // Thinking blocks are not observable work, so they do not count as partial.
   const content = message.content;
@@ -131,13 +150,25 @@ function readRefusal(message: unknown): Refusal | undefined {
       if (block.type === "toolCall") return true;
       return block.type === "text" && typeof block.text === "string" && block.text.trim() !== "";
     });
+  const model = readString(message, "model");
 
-  return {
-    model: readString(message, "model"),
-    category: readString(details, "category"),
-    explanation: readString(details, "explanation"),
-    partial,
-  };
+  const details = message.stopDetails;
+  if (isRecord(details) && (details.type === "refusal" || details.type === "sensitive")) {
+    return {
+      model,
+      category: readString(details, "category"),
+      explanation: readString(details, "explanation"),
+      partial,
+    };
+  }
+
+  const errorId = message.errorId;
+  const flagged = typeof errorId === "number" && (errorId & CONTENT_BLOCKED_FLAG) !== 0;
+  const errorMessage = readString(message, "errorMessage");
+  if (!flagged && !(errorMessage !== null && CONTENT_BLOCK_PATTERN.test(errorMessage))) {
+    return undefined;
+  }
+  return { model, category: "content-blocked", explanation: errorMessage, partial };
 }
 
 function appendLog(record: RefusalRecord): void {

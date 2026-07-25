@@ -344,3 +344,63 @@ test("a refusal carrying only thinking is still rescued", async () => {
 
   assert.ok(result, "thinking is not observable output, so the turn is still silent");
 });
+
+/** Google reports a block as an ordinary error carrying omp's ContentBlocked flag. */
+const googleBlock = {
+  role: "assistant",
+  model: "gemini-3-pro",
+  stopReason: "error",
+  errorId: 32768,
+  errorMessage: "Request blocked by Google (SAFETY)",
+};
+
+/** OpenAI chat-completions reports it as error text with no flag. */
+const openaiBlock = {
+  role: "assistant",
+  model: "gpt-5.2",
+  stopReason: "error",
+  errorMessage: "Provider finish_reason: content_filter",
+};
+
+test("a Google content block is detected via omp's ContentBlocked flag", async () => {
+  const h = await load({});
+
+  await h.fire("turn_start", { type: "turn_start" });
+  await h.fire("message_end", { type: "message_end", message: googleBlock });
+  const result = await h.fire("session_stop", stopEvent);
+
+  assert.ok(result, "a flagged content block should be rescued like a Claude refusal");
+  const record = JSON.parse(readFileSync(h.logPath, "utf8").trim());
+  assert.equal(record.model, "gemini-3-pro");
+  assert.equal(record.category, "content-blocked");
+  assert.equal(record.explanation, "Request blocked by Google (SAFETY)");
+});
+
+test("an OpenAI content_filter is detected from the error text alone", async () => {
+  const h = await load({});
+
+  await h.fire("turn_start", { type: "turn_start" });
+  await h.fire("message_end", { type: "message_end", message: openaiBlock });
+  const result = await h.fire("session_stop", stopEvent);
+
+  assert.ok(result, "an unflagged content_filter should still be caught");
+});
+
+test("an ordinary provider error is not mistaken for a content block", async () => {
+  const h = await load({});
+
+  await h.fire("turn_start", { type: "turn_start" });
+  await h.fire("message_end", {
+    type: "message_end",
+    message: {
+      role: "assistant",
+      model: "gpt-5.2",
+      stopReason: "error",
+      errorId: 2048,
+      errorMessage: "Overloaded: please retry your request",
+    },
+  });
+  const result = await h.fire("session_stop", stopEvent);
+
+  assert.equal(result, undefined);
+});

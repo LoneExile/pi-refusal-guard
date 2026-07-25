@@ -5,6 +5,23 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-07-25
+
+### Added
+
+- Detect content blocks from providers other than Anthropic. Google
+  (`promptFeedback.blockReason`) and OpenAI Responses (`incomplete:
+  content_filter`) are recognised through omp's `ContentBlocked` error flag;
+  OpenAI chat-completions reports `finish_reason: content_filter` with no flag,
+  so that one is matched on the error text. These carry no provider category and
+  are recorded as `content-blocked`.
+
+### Changed
+
+- Detection now requires `stopReason === "error"`, which every classifier
+  decline already sets. Retarget remains Anthropic-only — `fallbacks` is a
+  parameter of Anthropic's beta and has no equivalent elsewhere.
+
 ## [0.1.0] - 2026-07-25
 
 ### Added

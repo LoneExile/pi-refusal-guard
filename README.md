@@ -16,6 +16,10 @@ fallback model was actually applied*. With no fallback chain configured, the
 chain ends without even emitting a retry: the assistant turn has no content, and
 the agent just stops. Ask a security question, watch the harness die.
 
+Other providers do the same thing under different names — Google's
+`promptFeedback.blockReason`, OpenAI's `content_filter` — and land in the same
+place: a turn with nothing in it. See [Provider coverage](#provider-coverage).
+
 ## What this adds
 
 | | |
@@ -86,6 +90,27 @@ Anthropic retries inside a single API call and returns one message whose stop
 reason is already normal, so no client-side tool can see that a refusal
 happened. If you want `/refusals` to show the full picture, lean on
 `retry.fallbackChains`.
+
+## Provider coverage
+
+Claude is the case this was built for, but the rescue and the log are not
+Anthropic-specific.
+
+| Provider | Detected how | Category recorded |
+|---|---|---|
+| Anthropic | `stopDetails.type` is `refusal` or `sensitive` | the real one — `cyber`, `bio`, `frontier_llm`, … |
+| Google | omp's `ContentBlocked` error flag, set from `promptFeedback.blockReason` | `content-blocked` |
+| OpenAI (Responses) | same flag, set from `incomplete: content_filter` | `content-blocked` |
+| OpenAI (chat completions) | error text, since that path reports `finish_reason: content_filter` with no flag | `content-blocked` |
+| Anything else omp flags as content-blocked | the same flag | `content-blocked` |
+
+Only Anthropic reports a *named* category, so only Claude refusals give
+`/refusals` a meaningful category breakdown. Everything else is recorded with
+its provider error text as the explanation.
+
+**Retarget is Anthropic-only** and always will be — `fallbacks` is a parameter
+of Anthropic's server-side-fallback beta, with no equivalent elsewhere. Rescue
+and telemetry are the cross-provider parts.
 
 ## Install
 
