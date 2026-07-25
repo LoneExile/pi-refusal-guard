@@ -79,8 +79,12 @@ interface RefusalRecord {
   model: string | null;
   category: string | null;
   explanation: string | null;
-  /** How the turn ended up being saved, once known. */
-  outcome: "pending" | "fallback" | "rescued" | "dead";
+  /**
+   * How the turn ended up. `fallback` — a later model answered; `rescued` — this
+   * extension continued it; `partial` — output had already been emitted, so it
+   * was left alone; `dead` — nothing recovered it.
+   */
+  outcome: "pending" | "fallback" | "rescued" | "partial" | "dead";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -92,24 +96,47 @@ function readString(source: Record<string, unknown>, key: string): string | null
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+interface Refusal {
+  model: string | null;
+  category: string | null;
+  explanation: string | null;
+  /**
+   * Whether the model had already emitted text or a tool call before the
+   * classifier cut it off. Anthropic refuses either before any output or
+   * mid-stream, and omp lets a refusal bypass its usual "already produced
+   * output" retry exclusion — so this has to be checked here.
+   */
+  partial: boolean;
+}
+
 /**
  * Pull refusal details off an assistant message. Anthropic reports a classifier
  * decline as stopReason "error" with stopDetails.type "refusal"; some paths
  * surface it as "sensitive" instead.
  */
-function readRefusal(
-  message: unknown,
-): { model: string | null; category: string | null; explanation: string | null } | undefined {
+function readRefusal(message: unknown): Refusal | undefined {
   if (!isRecord(message)) return undefined;
   if (message.role !== "assistant") return undefined;
   const details = message.stopDetails;
   if (!isRecord(details)) return undefined;
   const type = details.type;
   if (type !== "refusal" && type !== "sensitive") return undefined;
+
+  // Thinking blocks are not observable work, so they do not count as partial.
+  const content = message.content;
+  const partial =
+    Array.isArray(content) &&
+    content.some((block) => {
+      if (!isRecord(block)) return false;
+      if (block.type === "toolCall") return true;
+      return block.type === "text" && typeof block.text === "string" && block.text.trim() !== "";
+    });
+
   return {
     model: readString(message, "model"),
     category: readString(details, "category"),
     explanation: readString(details, "explanation"),
+    partial,
   };
 }
 
@@ -198,11 +225,18 @@ export default function refusalGuard(pi: ExtensionAPI): void {
     .slice(0, MAX_FALLBACKS);
 
   /** Refusal seen in the current turn that nothing has recovered yet. */
-  let pending: { category: string | null; explanation: string | null } | undefined;
+  let pending:
+    | { category: string | null; explanation: string | null; partial: boolean }
+    | undefined;
   /** Log entry for `pending`, so its outcome can be amended once known. */
   let pendingRecord: RefusalRecord | undefined;
-  /** One rescue per turn — the runtime caps continuations, we stay well under. */
-  let rescuedThisTurn = false;
+  /**
+   * Rescues since the last turn that actually produced output. Deliberately not
+   * reset on `turn_start`: a rescue continuation may itself open a new turn, so
+   * a turn-scoped guard would reset itself and let a persistently-refusing
+   * model rescue over and over. Only real output clears this.
+   */
+  let rescueStreak = 0;
 
   function settle(outcome: RefusalRecord["outcome"]): void {
     if (pendingRecord && pendingRecord.outcome === "pending") {
@@ -213,8 +247,10 @@ export default function refusalGuard(pi: ExtensionAPI): void {
     pendingRecord = undefined;
   }
 
+  // A refusal that never reached settle-time (aborted turn, session switch)
+  // must not leak into the next turn and trigger a rescue there.
   pi.on("turn_start", () => {
-    rescuedThisTurn = false;
+    if (pending) settle("dead");
   });
 
   // Record every classifier refusal, and remember it as unrecovered.
@@ -222,13 +258,19 @@ export default function refusalGuard(pi: ExtensionAPI): void {
     if (!isRecord(event)) return;
     const refusal = readRefusal(event.message);
     if (!refusal) {
-      // A clean assistant turn means anything pending already got recovered.
+      // Real output: whatever was pending got recovered, and the streak that
+      // guards against endless rescues is cleared.
       if (isRecord(event.message) && event.message.role === "assistant") {
         settle("fallback");
+        rescueStreak = 0;
       }
       return;
     }
-    pending = { category: refusal.category, explanation: refusal.explanation };
+    pending = {
+      category: refusal.category,
+      explanation: refusal.explanation,
+      partial: refusal.partial,
+    };
     pendingRecord = {
       ts: new Date().toISOString(),
       model: refusal.model,
@@ -243,12 +285,20 @@ export default function refusalGuard(pi: ExtensionAPI): void {
   });
 
   // A refused turn that reached settle-time was not recovered by the built-in
-  // fallback chain. Give it one continuation instead of a silent dead stop.
+  // fallback chain. Give it one continuation instead of a silent dead stop —
+  // but only one, until some turn actually produces output again.
   pi.on("session_stop", (event): SessionStopResult | undefined => {
     if (!isRecord(event)) return undefined;
     if (event.stop_hook_active === true) return undefined;
     if (!pending) return undefined;
-    if (!rescueEnabled || rescuedThisTurn) {
+    if (pending.partial) {
+      // The model already emitted text or a tool call before being cut off, so
+      // this was not a silent dead stop. Re-prompting would risk duplicating
+      // work the user can already see; record it and leave the turn alone.
+      settle("partial");
+      return undefined;
+    }
+    if (!rescueEnabled || rescueStreak > 0) {
       settle("dead");
       return undefined;
     }
@@ -264,7 +314,7 @@ export default function refusalGuard(pi: ExtensionAPI): void {
       `protected, which system, why the user is authorized), and proceed. If the ` +
       `request genuinely cannot be answered, say so plainly and explain what you ` +
       `can do instead — do not stop silently.`;
-    rescuedThisTurn = true;
+    rescueStreak += 1;
     settle("rescued");
     return { continue: true, additionalContext: note };
   });

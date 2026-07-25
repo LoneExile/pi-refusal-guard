@@ -105,6 +105,24 @@ const refusalMessage = {
   },
 };
 
+/** A mid-stream refusal: the model spoke, then the classifier cut it off. */
+const partialTextRefusal = {
+  ...refusalMessage,
+  content: [{ type: "text", text: "Here is how the auth flow works" }],
+};
+
+/** A mid-stream refusal that left a tool call with no result behind. */
+const partialToolRefusal = {
+  ...refusalMessage,
+  content: [{ type: "toolCall", id: "call_1", name: "read", arguments: {} }],
+};
+
+/** Thinking is not observable work, so this still counts as a silent refusal. */
+const thinkingOnlyRefusal = {
+  ...refusalMessage,
+  content: [{ type: "thinking", thinking: "considering the request" }],
+};
+
 const stopEvent = { type: "session_stop", turn_id: 1, stop_hook_active: false };
 
 beforeEach(() => {
@@ -139,17 +157,61 @@ test("a refused turn is continued instead of dead-stopping", async () => {
   assert.match(h.notices[0], /Classifier refusal \(cyber\)/);
 });
 
-test("only one rescue per turn, so a stuck refusal cannot loop", async () => {
+test("the rescue cap survives a continuation that opens a new turn", async () => {
+  const h = await load({});
+
+  await h.fire("turn_start", { type: "turn_start" });
+  await h.fire("message_end", { type: "message_end", message: refusalMessage });
+  const first = await h.fire("session_stop", stopEvent);
+  assert.ok(first, "the first refusal should be rescued");
+
+  // The continuation opens its own turn. A turn-scoped guard would reset here
+  // and rescue again, looping until the runtime's continuation cap.
+  await h.fire("turn_start", { type: "turn_start" });
+  await h.fire("message_end", { type: "message_end", message: refusalMessage });
+  const second = await h.fire("session_stop", stopEvent);
+
+  assert.equal(second, undefined);
+});
+
+test("the rescue cap lifts once a turn actually produces output", async () => {
   const h = await load({});
 
   await h.fire("turn_start", { type: "turn_start" });
   await h.fire("message_end", { type: "message_end", message: refusalMessage });
   await h.fire("session_stop", stopEvent);
 
-  await h.fire("message_end", { type: "message_end", message: refusalMessage });
-  const second = await h.fire("session_stop", stopEvent);
+  // A later turn answers normally, so a refusal after it is a fresh incident.
+  await h.fire("turn_start", { type: "turn_start" });
+  await h.fire("message_end", {
+    type: "message_end",
+    message: { role: "assistant", model: "claude-opus-4-8", stopReason: "stop" },
+  });
+  await h.fire("session_stop", stopEvent);
 
-  assert.equal(second, undefined);
+  await h.fire("turn_start", { type: "turn_start" });
+  await h.fire("message_end", { type: "message_end", message: refusalMessage });
+  const later = await h.fire("session_stop", stopEvent);
+
+  assert.ok(later, "a refusal after real output should be rescued again");
+});
+
+test("an abandoned refusal does not leak a rescue into the next turn", async () => {
+  const h = await load({});
+
+  // Refusal, then the turn is abandoned before session_stop ever fires.
+  await h.fire("turn_start", { type: "turn_start" });
+  await h.fire("message_end", { type: "message_end", message: refusalMessage });
+
+  await h.fire("turn_start", { type: "turn_start" });
+  const next = await h.fire("session_stop", stopEvent);
+
+  assert.equal(next, undefined);
+  const outcomes = readFileSync(h.logPath, "utf8")
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line).outcome);
+  assert.deepEqual(outcomes, ["dead"]);
 });
 
 test("a clean turn is never continued", async () => {
@@ -246,4 +308,39 @@ test("/refusals reports what tripped", async () => {
   assert.match(h.sent[0], /cyber/);
   assert.match(h.sent[0], /claude-fable-5/);
   assert.match(h.sent[0], /rescued/);
+});
+
+test("a refusal that already emitted text is left alone, not re-prompted", async () => {
+  const h = await load({});
+
+  await h.fire("turn_start", { type: "turn_start" });
+  await h.fire("message_end", { type: "message_end", message: partialTextRefusal });
+  const result = await h.fire("session_stop", stopEvent);
+
+  assert.equal(result, undefined);
+  const outcomes = readFileSync(h.logPath, "utf8")
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line).outcome);
+  assert.deepEqual(outcomes, ["partial"]);
+});
+
+test("a refusal that left a dangling tool call is left alone", async () => {
+  const h = await load({});
+
+  await h.fire("turn_start", { type: "turn_start" });
+  await h.fire("message_end", { type: "message_end", message: partialToolRefusal });
+  const result = await h.fire("session_stop", stopEvent);
+
+  assert.equal(result, undefined);
+});
+
+test("a refusal carrying only thinking is still rescued", async () => {
+  const h = await load({});
+
+  await h.fire("turn_start", { type: "turn_start" });
+  await h.fire("message_end", { type: "message_end", message: thinkingOnlyRefusal });
+  const result = await h.fire("session_stop", stopEvent);
+
+  assert.ok(result, "thinking is not observable output, so the turn is still silent");
 });

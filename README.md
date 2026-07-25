@@ -20,13 +20,25 @@ the agent just stops. Ask a security question, watch the harness die.
 
 | | |
 |---|---|
-| **Rescue** | A refused turn that nothing else recovered gets exactly one continuation carrying a reframing note, instead of a silent dead stop. |
+| **Rescue** | A refused turn that produced *no output* and that nothing else recovered gets one continuation carrying a reframing note, instead of a silent dead stop. |
 | **Telemetry** | Every refusal is appended to a JSONL log. `/refusals` reports which categories and models are tripping, and how often a fallback saved the turn. |
 | **Retarget** | Rewrites Anthropic's server-side `fallbacks` chain so you choose the target models instead of the hardcoded default. |
 
 The rescue note reframes the task honestly — it states which category fired and
 asks the agent to restate the work in concrete defensive terms or say plainly
 what it cannot do. It does not try to defeat the classifier.
+
+Two deliberate limits on the rescue:
+
+- **Empty refusals only.** Anthropic can refuse *mid-stream*, after the model has
+  already emitted text or started a tool call. That turn is not a silent stop —
+  you can see what happened — and re-prompting risks duplicating work or
+  stranding a tool call. Those are logged as `partial` and left alone. Thinking
+  blocks don't count as output, so a think-then-refuse turn is still rescued.
+- **One rescue until real output.** The counter is cleared by a turn that
+  actually produces something, *not* by a turn boundary — a rescue continuation
+  may open a turn of its own, so a turn-scoped guard would reset itself and let
+  a persistently-refusing model loop.
 
 ## Install
 

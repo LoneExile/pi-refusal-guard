@@ -9,11 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Rescue: a Claude safety-classifier refusal that no fallback recovered now gets
-  one continuation carrying a reframing note, instead of ending the turn with no
-  output.
+- Rescue: a Claude safety-classifier refusal that produced no output and that no
+  fallback recovered now gets one continuation carrying a reframing note,
+  instead of ending the turn silently. A mid-stream refusal that already emitted
+  text or a tool call is recorded and left alone, since re-prompting there risks
+  duplicating work or stranding a tool call.
+- The one-rescue guard is cleared by a turn that actually produces output rather
+  than by a turn boundary, so a rescue continuation that opens its own turn
+  cannot reset the guard and loop.
 - Telemetry: refusals are appended to `~/.omp/refusal-guard.jsonl` with model,
-  category, explanation and outcome (`fallback`, `rescued`, or `dead`).
+  category, explanation and outcome (`fallback`, `rescued`, `partial`, `dead`).
 - `/refusals` command reporting categories, models, outcomes and recent entries,
   with `on` / `off` / `clear` subcommands.
 - Retarget: `OMP_REFUSAL_FALLBACKS` rewrites Anthropic's server-side `fallbacks`
