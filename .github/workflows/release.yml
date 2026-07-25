@@ -1,0 +1,46 @@
+name: Release
+
+# Publishes to npm when a GitHub Release is published (tag the release with the
+# version, e.g. v0.1.0, after bumping "version" in package.json). Can also be
+# run manually.
+#
+# Tokenless: authentication uses npm Trusted Publishing (OIDC) — no NPM_TOKEN.
+# One-time setup on npmjs.com: package "pi-refusal-guard" → Settings →
+# Publishing access → add a GitHub Actions trusted publisher for
+# repo LoneExile/pi-refusal-guard, workflow ".github/workflows/release.yml".
+# Provenance is generated automatically for trusted-publisher releases.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for npm Trusted Publishing (OIDC) + provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Upgrade npm (Trusted Publishing needs npm >= 11.5.1)
+        run: npm install -g npm@latest
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Publish to npm
+        run: npm publish --access public

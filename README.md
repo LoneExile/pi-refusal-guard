@@ -1,0 +1,118 @@
+# pi-refusal-guard
+
+A Claude safety-classifier refusal shouldn't kill your turn.
+
+An extension for [Pi](https://pi.dev) / [OMP (Oh My Pi)](https://github.com/can1357/oh-my-pi).
+
+## The problem
+
+Claude Fable 5, Mythos 5 and Opus 5 run real-time safety classifiers. When one
+declines, the API returns **HTTP 200** with `stop_reason: "refusal"` and a
+`stop_details.category` — most often `cyber`, which
+[Anthropic documents as firing on benign cybersecurity work](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback).
+
+omp classifies that as a retryable error, but the retry only proceeds *if a
+fallback model was actually applied*. With no fallback chain configured, the
+chain ends without even emitting a retry: the assistant turn has no content, and
+the agent just stops. Ask a security question, watch the harness die.
+
+## What this adds
+
+| | |
+|---|---|
+| **Rescue** | A refused turn that nothing else recovered gets exactly one continuation carrying a reframing note, instead of a silent dead stop. |
+| **Telemetry** | Every refusal is appended to a JSONL log. `/refusals` reports which categories and models are tripping, and how often a fallback saved the turn. |
+| **Retarget** | Rewrites Anthropic's server-side `fallbacks` chain so you choose the target models instead of the hardcoded default. |
+
+The rescue note reframes the task honestly — it states which category fired and
+asks the agent to restate the work in concrete defensive terms or say plainly
+what it cannot do. It does not try to defeat the classifier.
+
+## Install
+
+```
+omp plugin install pi-refusal-guard
+```
+
+Or drop `extensions/refusal-guard.ts` into `~/.omp/agent/extensions/`.
+
+## Configure first (this matters)
+
+omp already ships two fallback mechanisms. Turn them on — this extension
+complements them, it does not replace them.
+
+```yaml
+# ~/.omp/agent/config.yml
+providers:
+  anthropic:
+    # Server-side: one round trip, Anthropic retries the refused request on
+    # claude-opus-4-8. Only applies to Fable 5 / Mythos 5.
+    serverSideFallback: true
+
+retry:
+  modelFallback: true
+  fallbackChains:
+    # Client-side: covers Opus 5 too, and any provider.
+    anthropic/claude-fable-5:
+      - anthropic/claude-opus-4-8
+    anthropic/claude-mythos-5:
+      - anthropic/claude-opus-4-8
+    anthropic/claude-opus-5:
+      - anthropic/claude-opus-4-8
+```
+
+With those set, most refusals are handled before this extension is needed. It
+covers what is left: the refusal that the whole chain declined, and the question
+of what is tripping in the first place.
+
+## Settings
+
+All optional, read from the environment at load.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `OMP_REFUSAL_RESCUE` | `on` | Set to `off`/`0`/`false`/`no` to disable the continuation. |
+| `OMP_REFUSAL_FALLBACKS` | *(unset)* | Comma-separated model ids replacing the server-side chain, e.g. `claude-opus-4-8,claude-sonnet-5`. Max 3 (Anthropic's limit). |
+| `OMP_REFUSAL_LOG` | `~/.omp/refusal-guard.jsonl` | Where refusals are recorded. |
+
+## Commands
+
+| Command | Effect |
+|---|---|
+| `/refusals` | Report categories, models, outcomes and the five most recent refusals. |
+| `/refusals on` \| `/refusals off` | Toggle the rescue for this session. |
+| `/refusals clear` | Delete the log. |
+
+## Why retarget is rewrite-only
+
+`OMP_REFUSAL_FALLBACKS` only takes effect on a request that **already carries** a
+`fallbacks` array — that is, when `providers.anthropic.serverSideFallback` is on
+and the model is Fable 5 or Mythos 5.
+
+This is deliberate. The `server-side-fallback` beta header is assembled from the
+request options *before* the `before_provider_request` hook runs. A `fallbacks`
+array injected where none existed would be sent without its beta header and
+rejected by the API. Verified against a live request:
+
+```
+{"model":"claude-fable-5","fallbacks":[{"model":"claude-opus-4-8"}]}
+{"model":"claude-sonnet-5","fallbacks":null}
+```
+
+So: enable the built-in flag to get the header and the default chain, then this
+swaps in the models you picked.
+
+## Development
+
+```
+npm install
+npm run typecheck
+npm test
+```
+
+Tests drive the extension through a fake `ExtensionAPI` — no omp install, no
+network.
+
+## License
+
+MIT

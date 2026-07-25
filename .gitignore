@@ -1,0 +1,6 @@
+node_modules/
+*.log
+.DS_Store
+assets/*.mp4
+assets/*.gif
+*.tgz

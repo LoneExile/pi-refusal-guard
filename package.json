@@ -1,0 +1,54 @@
+{
+  "name": "pi-refusal-guard",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A Claude safety-classifier refusal shouldn't kill your turn — rescue, retarget the server-side fallback chain, and see what's tripping.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "omp",
+    "oh-my-pi",
+    "extension",
+    "claude",
+    "anthropic",
+    "refusal",
+    "fallback",
+    "safety-classifier"
+  ],
+  "license": "MIT",
+  "author": "LoneExile",
+  "homepage": "https://github.com/LoneExile/pi-refusal-guard#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LoneExile/pi-refusal-guard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/LoneExile/pi-refusal-guard/issues"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "omp": {
+    "name": "pi-refusal-guard",
+    "description": "A Claude safety-classifier refusal shouldn't kill your turn — rescue, retarget the server-side fallback chain, and see what's tripping.",
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test 'tests/*.test.ts'"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.0"
+  },
+  "files": [
+    "extensions",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
+}
