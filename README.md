@@ -78,8 +78,14 @@ flowchart TD
 ```
 
 Without the extension, everything that falls out of layer 2 ends the turn with
-no output and no explanation. Every refusal is logged either way, so `/refusals`
-shows what tripped even when a layer above recovered it.
+no output and no explanation.
+
+One asymmetry worth knowing: a layer-2 recovery *is* recorded, because omp
+surfaces the refused message before it retries. A layer-1 recovery is not —
+Anthropic retries inside a single API call and returns one message whose stop
+reason is already normal, so no client-side tool can see that a refusal
+happened. If you want `/refusals` to show the full picture, lean on
+`retry.fallbackChains`.
 
 ## Install
 
