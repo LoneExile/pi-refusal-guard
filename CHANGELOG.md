@@ -5,6 +5,23 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-07-25
+
+### Fixed
+
+- **Pi could not start with this extension installed.** `setLabel` was called
+  during module evaluation, which Pi rejects with
+  `ExtensionRuntimeNotInitializedError` — and that aborts the whole agent, not
+  just the extension. Calling it later did not help either: Pi's `setLabel`
+  renames a session entry and throws `Entry ... not found`. The call is gone;
+  the message box was titled by `customType` all along, so nothing is lost.
+
+### Changed
+
+- Settings are accepted under `PI_REFUSAL_*` as well as `OMP_REFUSAL_*`.
+- The log now defaults to `~/.refusal-guard/refusals.jsonl` instead of a path
+  under `~/.omp`, so it is not misleading on Pi. One log serves both harnesses.
+
 ## [0.2.0] - 2026-07-25
 
 ### Added

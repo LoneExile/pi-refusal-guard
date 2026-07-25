@@ -41,7 +41,6 @@ type EventHandler = (
   ctx: ExtensionContext,
 ) => unknown | Promise<unknown>;
 interface ExtensionAPI {
-  setLabel(label: string): void;
   on(event: string, handler: EventHandler): void;
   registerCommand(
     name: string,
@@ -63,8 +62,19 @@ interface ExtensionAPI {
 
 // ---------------------------------------------------------------- settings --
 
-const LOG_PATH =
-  process.env.OMP_REFUSAL_LOG ?? join(homedir(), ".omp", "refusal-guard.jsonl");
+/**
+ * Settings are read from `OMP_REFUSAL_*` or the `PI_REFUSAL_*` alias, so the
+ * same package configures cleanly on either harness.
+ */
+function setting(name: string): string | undefined {
+  return process.env[`OMP_REFUSAL_${name}`] ?? process.env[`PI_REFUSAL_${name}`];
+}
+
+/**
+ * One log across both harnesses, so refusals stay in a single place no matter
+ * which agent hit them. Override with `OMP_REFUSAL_LOG` / `PI_REFUSAL_LOG`.
+ */
+const LOG_PATH = setting("LOG") ?? join(homedir(), ".refusal-guard", "refusals.jsonl");
 
 /** Anthropic accepts at most three server-side fallback entries. */
 const MAX_FALLBACKS = 3;
@@ -245,11 +255,15 @@ function summarize(records: RefusalRecord[]): string {
 // ------------------------------------------------------------- entry point --
 
 export default function refusalGuard(pi: ExtensionAPI): void {
-  pi.setLabel("refusal-guard");
+  // No setLabel call here, on purpose. omp uses it to name the extension, but
+  // Pi's setLabel renames a session entry and throws "Entry ... not found"; at
+  // module-load time it throws ExtensionRuntimeNotInitializedError instead,
+  // which aborts the whole agent. The message box is titled by the customType
+  // on sendMessage, so nothing is lost by leaving it out.
 
-  const rescueRaw = process.env.OMP_REFUSAL_RESCUE?.trim();
+  const rescueRaw = setting("RESCUE")?.trim();
   let rescueEnabled = rescueRaw === undefined || !OFF_PATTERN.test(rescueRaw);
-  const fallbackChain = (process.env.OMP_REFUSAL_FALLBACKS ?? "")
+  const fallbackChain = (setting("FALLBACKS") ?? "")
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0)

@@ -114,11 +114,24 @@ and telemetry are the cross-provider parts.
 
 ## Install
 
-```
-omp plugin install pi-refusal-guard
+```bash
+# Pi
+pi install npm:pi-refusal-guard
+
+# OMP (Oh My Pi)
+omp plugin install npm:pi-refusal-guard
 ```
 
-Or drop `extensions/refusal-guard.ts` into `~/.omp/agent/extensions/`.
+Straight from git, without npm:
+
+```bash
+pi install git:github.com/LoneExile/pi-refusal-guard
+```
+
+Or drop `extensions/refusal-guard.ts` into `~/.pi/agent/extensions/` or
+`~/.omp/agent/extensions/`.
+
+Restart the agent (or open a new session) after installing.
 
 ## Configure first (this matters)
 
@@ -151,13 +164,15 @@ of what is tripping in the first place.
 
 ## Settings
 
-All optional, read from the environment at load.
+All optional, read from the environment at load. Each is accepted under either
+prefix — `OMP_REFUSAL_*` or `PI_REFUSAL_*` — so the same package configures
+cleanly on either harness.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `OMP_REFUSAL_RESCUE` | `on` | Set to `off`/`0`/`false`/`no` to disable the continuation. |
-| `OMP_REFUSAL_FALLBACKS` | *(unset)* | Comma-separated model ids replacing the server-side chain, e.g. `claude-opus-4-8,claude-sonnet-5`. Max 3 (Anthropic's limit). |
-| `OMP_REFUSAL_LOG` | `~/.omp/refusal-guard.jsonl` | Where refusals are recorded. |
+| `…_REFUSAL_RESCUE` | `on` | Set to `off`/`0`/`false`/`no` to disable the continuation. |
+| `…_REFUSAL_FALLBACKS` | *(unset)* | Comma-separated model ids replacing the server-side chain, e.g. `claude-opus-4-8,claude-sonnet-5`. Max 3 (Anthropic's limit). |
+| `…_REFUSAL_LOG` | `~/.refusal-guard/refusals.jsonl` | Where refusals are recorded. One log for both harnesses, so everything lands in one place regardless of which agent hit it. |
 
 ## Commands
 

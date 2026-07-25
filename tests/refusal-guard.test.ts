@@ -404,3 +404,20 @@ test("an ordinary provider error is not mistaken for a content block", async () 
 
   assert.equal(result, undefined);
 });
+
+test("settings are also readable under the PI_ prefix", async () => {
+  const h = await load({
+    OMP_REFUSAL_FALLBACKS: undefined,
+    PI_REFUSAL_FALLBACKS: "claude-opus-4-8",
+  });
+
+  const result = await h.fire("before_provider_request", {
+    type: "before_provider_request",
+    payload: { model: "claude-fable-5", fallbacks: [{ model: "claude-sonnet-5" }] },
+  });
+
+  assert.deepEqual(result, {
+    model: "claude-fable-5",
+    fallbacks: [{ model: "claude-opus-4-8" }],
+  });
+});

@@ -1,6 +1,6 @@
 {
   "name": "pi-refusal-guard",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "A Claude safety-classifier refusal shouldn't kill your turn — rescue, retarget the server-side fallback chain, and see what's tripping.",
   "keywords": [
