@@ -40,6 +40,55 @@ Two deliberate limits on the rescue:
   may open a turn of its own, so a turn-scoped guard would reset itself and let
   a persistently-refusing model loop.
 
+## How a refusal flows
+
+Three layers. The first two are omp's own and handle most refusals; this
+extension covers what falls through.
+
+```mermaid
+flowchart TD
+    REQ["Request to Claude"]
+    CLS{"Classifier declined?"}
+    DONE["Turn completes normally"]
+
+    subgraph BUILTIN["Built into omp - turn these on first"]
+        L1{"serverSideFallback on, and model is Fable 5 / Mythos 5?"}
+        SSF["Anthropic re-runs the request on claude-opus-4-8"]
+        L2{"retry.fallbackChains covers this model?"}
+        CHAIN["omp pins the next model and retries the turn"]
+    end
+
+    subgraph GUARD["pi-refusal-guard"]
+        REC["Record model, category, explanation"]
+        PART{"Text or tool call already emitted?"}
+        LEAVE["Leave the turn alone - logged partial"]
+        CAP{"Already rescued since the last real output?"}
+        DEAD["Stop - logged dead"]
+        RESCUE["Continue with a reframing note - logged rescued"]
+    end
+
+    REQ --> CLS
+    CLS -->|no| DONE
+    CLS -->|"yes, stop_reason refusal"| L1
+    L1 -->|yes| SSF
+    L1 -->|no| L2
+    SSF -->|answered| DONE
+    SSF -->|"still refused"| L2
+    L2 -->|yes| CHAIN
+    L2 -->|"no, and this is where the turn dies silently"| REC
+    CHAIN -->|answered| DONE
+    CHAIN -->|"still refused"| REC
+    REC --> PART
+    PART -->|yes| LEAVE
+    PART -->|no| CAP
+    CAP -->|yes| DEAD
+    CAP -->|no| RESCUE
+    RESCUE --> DONE
+```
+
+Without the extension, every path that reaches the bottom of the omp layers ends
+the turn with no output and no explanation.
+
 ## Install
 
 ```
@@ -111,8 +160,32 @@ rejected by the API. Verified against a live request:
 {"model":"claude-sonnet-5","fallbacks":null}
 ```
 
-So: enable the built-in flag to get the header and the default chain, then this
-swaps in the models you picked.
+```mermaid
+flowchart TD
+    BUILD["omp builds the Anthropic request"]
+    GATE{"serverSideFallback on, and model eligible?"}
+    WITH["body carries fallbacks claude-opus-4-8, headers carry the beta"]
+    WITHOUT["body carries no fallbacks, headers carry no beta"]
+    HOOK["before_provider_request - the extension runs here"]
+    ASK{"OMP_REFUSAL_FALLBACKS set, and the body already has a chain?"}
+    SWAP["Swap in your chain - the beta header is already there"]
+    SKIP["Leave the body untouched"]
+    SEND["Request sent"]
+
+    BUILD --> GATE
+    GATE -->|yes| WITH
+    GATE -->|no| WITHOUT
+    WITH --> HOOK
+    WITHOUT --> HOOK
+    HOOK --> ASK
+    ASK -->|yes| SWAP
+    ASK -->|no| SKIP
+    SWAP --> SEND
+    SKIP --> SEND
+```
+
+The hook runs after the headers are fixed. So: enable the built-in flag to get
+the header and the default chain, and this swaps in the models you picked.
 
 ## Development
 
