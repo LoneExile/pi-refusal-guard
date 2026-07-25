@@ -1,13 +1,20 @@
 name: Release
 
 # Publishes to npm when a GitHub Release is published (tag the release with the
-# version, e.g. v0.1.0, after bumping "version" in package.json). Can also be
+# version, e.g. v0.1.1, after bumping "version" in package.json). Can also be
 # run manually.
 #
 # Tokenless: authentication uses npm Trusted Publishing (OIDC) — no NPM_TOKEN.
-# One-time setup on npmjs.com: package "pi-refusal-guard" → Settings →
-# Publishing access → add a GitHub Actions trusted publisher for
-# repo LoneExile/pi-refusal-guard, workflow ".github/workflows/release.yml".
+#
+# Bootstrap, in this order — a trusted publisher is configured on a package's
+# settings page, which does not exist until the package does, so OIDC cannot
+# perform a package's very first publish (npm/cli#8544):
+#   1. publish 0.1.0 by hand: `npm login && npm publish --access public`
+#   2. npmjs.com → pi-refusal-guard → Settings → Trusted Publisher →
+#      GitHub Actions, org "LoneExile", repo "pi-refusal-guard",
+#      workflow "release.yml", allowed action "npm publish"
+#   3. every release from 0.1.1 on runs through this workflow, tokenless
+#
 # Provenance is generated automatically for trusted-publisher releases.
 
 on:
